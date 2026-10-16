@@ -1,0 +1,33 @@
+name: jamia_app
+description: "تطبيق متكامل لإدارة الجمعيات المالية الذكية"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  sqflite: ^2.3.0
+  path: ^1.9.0
+  path_provider: ^2.1.2
+  intl: ^0.19.0
+  share_plus: ^10.0.0
+  pdf: ^3.10.8
+  printing: ^5.13.1
+  flutter_local_notifications: ^17.2.2
+  timezone: ^0.9.4
+  local_auth: ^2.2.0
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
