@@ -27,6 +27,7 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
   String _cycleType = 'monthly';
   String _paymentMethod = 'cash';
   DateTime _startDate = DateTime.now();
+  late DateTime _endDate;
 
   final List<MemberInput> _members = [];
   final _memberNameController = TextEditingController();
@@ -45,7 +46,39 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
     if (item != null) {
       _cycleType = item['cycle_type'] ?? 'monthly';
       _paymentMethod = item['payment_method'] ?? 'cash';
-      _startDate = DateTime.tryParse(item['start_date']) ?? DateTime.now();
+      _startDate = DateTime.tryParse(item['start_date'] ?? '') ?? DateTime.now();
+      if (item['end_date'] != null && item['end_date'].toString().isNotEmpty) {
+        _endDate = DateTime.tryParse(item['end_date']) ?? _calculateDefaultEnd(_startDate, item['total_months'] ?? 10, _cycleType);
+      } else {
+        _endDate = _calculateDefaultEnd(_startDate, item['total_months'] ?? 10, _cycleType);
+      }
+    } else {
+      _endDate = _calculateDefaultEnd(_startDate, 10, _cycleType);
+    }
+  }
+
+  DateTime _calculateDefaultEnd(DateTime start, int count, String cycle) {
+    final steps = count > 0 ? count - 1 : 0;
+    switch (cycle) {
+      case 'daily':
+        return start.add(Duration(days: steps));
+      case 'weekly':
+        return start.add(Duration(days: steps * 7));
+      case 'monthly':
+      default:
+        return DateTime(start.year, start.month + steps, start.day);
+    }
+  }
+
+  String _getInstallmentLabel() {
+    switch (_cycleType) {
+      case 'daily':
+        return 'قيمة القسط اليومي (ج.م)';
+      case 'weekly':
+        return 'قيمة القسط الأسبوعي (ج.م)';
+      case 'monthly':
+      default:
+        return 'قيمة القسط الشهري (ج.م)';
     }
   }
 
@@ -60,18 +93,37 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
       );
       _memberNameController.clear();
       _memberPhoneController.clear();
+      // تحديث تاريخ النهاية تلقائياً بناءً على عدد المشتركين إذا لم يكن معدلاً يدوياً
+      _endDate = _calculateDefaultEnd(_startDate, _members.length, _cycleType);
     });
   }
 
-  DateTime _calculateDate(DateTime start, int index, String cycle) {
-    switch (cycle) {
-      case 'daily':
-        return start.add(Duration(days: index));
-      case 'weekly':
-        return start.add(Duration(days: index * 7));
-      case 'monthly':
-      default:
-        return DateTime(start.year, start.month + index, start.day);
+  Future<void> _pickStartDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2040),
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked;
+        if (_endDate.isBefore(_startDate)) {
+          _endDate = _startDate.add(const Duration(days: 30));
+        }
+      });
+    }
+  }
+
+  Future<void> _pickEndDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _endDate.isAfter(_startDate) ? _endDate : _startDate,
+      firstDate: _startDate,
+      lastDate: DateTime(2040),
+    );
+    if (picked != null) {
+      setState(() => _endDate = picked);
     }
   }
 
@@ -79,27 +131,26 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
     if (!_formKey.currentState!.validate()) return;
     if (!isEditing && _members.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('برجاء إضافة الأعضاء المشتركين')),
+        const SnackBar(content: Text('برجاء إضافة المشتركين أولاً')),
       );
       return;
     }
 
     final db = await DBHelper.instance.database;
     final shareAmount = double.parse(_shareAmountController.text);
+    final startDateStr = DateFormat('yyyy-MM-dd').format(_startDate);
+    final endDateStr = DateFormat('yyyy-MM-dd').format(_endDate);
 
     if (isEditing) {
       final circleId = widget.existingCircle!['id'];
-      await db.update(
-        'circles',
-        {
-          'name': _nameController.text.trim(),
-          'share_amount': shareAmount,
-          'cycle_type': _cycleType,
-          'payment_method': _paymentMethod,
-          'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
-        },
-        where: 'id = ?',
-        whereArgs: [circleId],
+      await DBHelper.instance.updateCircleDetails(
+        circleId: circleId,
+        name: _nameController.text.trim(),
+        shareAmount: shareAmount,
+        cycleType: _cycleType,
+        paymentMethod: _paymentMethod,
+        startDate: startDateStr,
+        endDate: endDateStr,
       );
     } else {
       final totalMonths = _members.length;
@@ -108,7 +159,8 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
           'name': _nameController.text.trim(),
           'share_amount': shareAmount,
           'total_months': totalMonths,
-          'start_date': DateFormat('yyyy-MM-dd').format(_startDate),
+          'start_date': startDateStr,
+          'end_date': endDateStr,
           'cycle_type': _cycleType,
           'payment_method': _paymentMethod,
           'status': 'active',
@@ -126,7 +178,7 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
         }
 
         for (int i = 0; i < memberIds.length; i++) {
-          final payoutDate = _calculateDate(_startDate, i, _cycleType);
+          final payoutDate = _calculateDefaultEnd(_startDate, i + 1, _cycleType);
           final payoutId = await txn.insert('payouts', {
             'circle_id': circleId,
             'member_id': memberIds[i],
@@ -166,7 +218,7 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(isEditing ? 'تعديل الجمعية' : 'إنشاء جمعية جديدة'),
+        title: Text(isEditing ? 'تعديل بيانات الجمعية' : 'إنشاء جمعية جديدة'),
         centerTitle: true,
       ),
       body: Form(
@@ -174,6 +226,7 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
+            // اسم الجمعية
             TextFormField(
               controller: _nameController,
               decoration: const InputDecoration(
@@ -183,18 +236,9 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
               ),
               validator: (v) => v!.isEmpty ? 'مطلوب' : null,
             ),
-            const SizedBox(height: 12),
-            TextFormField(
-              controller: _shareAmountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'قيمة السهم الواحد (ج.م)',
-                border: OutlineInputBorder(),
-                prefixIcon: Icon(Icons.attach_money),
-              ),
-              validator: (v) => v!.isEmpty ? 'مطلوب' : null,
-            ),
             const SizedBox(height: 14),
+
+            // نوع دورية الجمعية
             const Text('دورية الجمعية:', style: TextStyle(fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             SegmentedButton<String>(
@@ -204,32 +248,87 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
                 ButtonSegment(value: 'monthly', label: Text('شهرية')),
               ],
               selected: {_cycleType},
-              onSelectionChanged: (val) => setState(() => _cycleType = val.first),
+              onSelectionChanged: (val) {
+                setState(() {
+                  _cycleType = val.first;
+                  _endDate = _calculateDefaultEnd(_startDate, _members.isNotEmpty ? _members.length : 10, _cycleType);
+                });
+              },
             ),
             const SizedBox(height: 14),
-            ListTile(
-              shape: RoundedRectangleBorder(
-                side: BorderSide(color: Colors.grey.shade400),
-                borderRadius: BorderRadius.circular(6),
+
+            // قيمة القسط (مع تحديث التسمية حسب الدورية)
+            TextFormField(
+              controller: _shareAmountController,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: _getInstallmentLabel(),
+                hintText: 'مثال: 500',
+                border: const OutlineInputBorder(),
+                prefixIcon: const Icon(Icons.attach_money),
               ),
-              leading: const Icon(Icons.event),
-              title: const Text('تاريخ أول قسط'),
-              trailing: Text(
-                DateFormat('yyyy-MM-dd').format(_startDate),
-                style: const TextStyle(fontWeight: FontWeight.bold),
+              validator: (v) => v!.isEmpty ? 'مطلوب تحديد قيمة القسط' : null,
+            ),
+            const SizedBox(height: 14),
+
+            // طريقة التوريد
+            DropdownButtonFormField<String>(
+              value: _paymentMethod,
+              decoration: const InputDecoration(
+                labelText: 'طريقة التوريد الافتراضية',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.payment),
               ),
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: _startDate,
-                  firstDate: DateTime(2024),
-                  lastDate: DateTime(2035),
-                );
-                if (picked != null) setState(() => _startDate = picked);
-              },
+              items: const [
+                DropdownMenuItem(value: 'cash', child: Text('كاش / نقدي')),
+                DropdownMenuItem(value: 'wallet', child: Text('محفظة إلكترونية (فودافون كاش)')),
+                DropdownMenuItem(value: 'bank', child: Text('إنستاباي / بنكي')),
+              ],
+              onChanged: (val) => setState(() => _paymentMethod = val!),
+            ),
+            const SizedBox(height: 14),
+
+            // تاريخ البداية وتاريخ النهاية
+            Row(
+              children: [
+                Expanded(
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    shape: RoundedRectangleBorder(
+                      side: BorderSide(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    leading: const Icon(Icons.play_circle_outline, color: Colors.green),
+                    title: const Text('تاريخ البداية', style: TextStyle(fontSize: 12)),
+                    subtitle: Text(
+                      DateFormat('yyyy-MM-dd').format(_startDate),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    onTap: _pickStartDate,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                    shape: RoundedRectangleBorder(
+                      side: BorderSide(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    leading: const Icon(Icons.flag_outlined, color: Colors.orange),
+                    title: const Text('تاريخ النهاية', style: TextStyle(fontSize: 12)),
+                    subtitle: Text(
+                      DateFormat('yyyy-MM-dd').format(_endDate),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    onTap: _pickEndDate,
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 18),
 
+            // قائمة المشتركين (في حالة الإنشاء فقط)
             if (!isEditing) ...[
               const Text('إضافة المشتركين وترتيب الأدوار:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
               const SizedBox(height: 8),
@@ -269,7 +368,7 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
                 },
                 itemBuilder: (context, index) {
                   final member = _members[index];
-                  final pDate = _calculateDate(_startDate, index, _cycleType);
+                  final pDate = _calculateDefaultEnd(_startDate, index + 1, _cycleType);
                   return Card(
                     key: ValueKey(member),
                     child: ListTile(
@@ -281,7 +380,12 @@ class _AddEditCircleScreenState extends State<AddEditCircleScreen> {
                         children: [
                           IconButton(
                             icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () => setState(() => _members.removeAt(index)),
+                            onPressed: () {
+                              setState(() {
+                                _members.removeAt(index);
+                                _endDate = _calculateDefaultEnd(_startDate, _members.length, _cycleType);
+                              });
+                            },
                           ),
                           const Icon(Icons.drag_handle),
                         ],
