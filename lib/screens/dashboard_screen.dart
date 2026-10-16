@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:share_plus/share_plus.dart';
 import '../database/db_helper.dart';
@@ -65,6 +66,41 @@ class _DashboardScreenState extends State<DashboardScreen> {
     });
   }
 
+  DateTime _calculateEndDate(DateTime start, int totalMonths, String cycle) {
+    final steps = totalMonths > 0 ? totalMonths - 1 : 0;
+    switch (cycle) {
+      case 'daily':
+        return start.add(Duration(days: steps));
+      case 'weekly':
+        return start.add(Duration(days: steps * 7));
+      case 'monthly':
+      default:
+        return DateTime(start.year, start.month + steps, start.day);
+    }
+  }
+
+  void _confirmDeleteCircle(Map<String, dynamic> circle) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('حذف الجمعية'),
+        content: Text('هل أنت متأكد من حذف جمعية "${circle['name']}" وكافة سجلات السداد والأعضاء التابعة لها؟'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await DBHelper.instance.deleteCircle(circle['id']);
+              _fetchDashboardData();
+            },
+            child: const Text('تأكيد الحذف'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _callMember(String phone) async {
     final uri = Uri.parse('tel:$phone');
     if (await canLaunchUrl(uri)) await launchUrl(uri);
@@ -74,9 +110,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final cur = SettingsController.currencyNotifier.value;
     final msg = '''
 السلام عليكم أ/ ${item['member_name']}،
-نود تذكيرك بوجود قسط متأخر بقيمة ${item['amount_paid']} $cur
-خاص بجمعية: "${item['circle_name']}" (دور ${item['month_index']}).
-يرجى المبادرة بالسداد لانتظام مواعيد الصرف. شكراً لك.
+نود تذكيرك بسداد القسط المستحق: ${item['amount_paid']} $cur
+لجمعية: "${item['circle_name']}" (دور ${item['month_index']}).
+يرجى المبادرة بالسداد. شكراً لتعاونكم.
 ''';
     Share.share(msg);
   }
@@ -127,8 +163,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         'الجمعيات المسجلة:',
                         style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
-                      TextButton.icon(
-                        icon: const Icon(Icons.add_circle_outline),
+                      FilledButton.icon(
+                        icon: const Icon(Icons.add),
                         label: const Text('إنشاء جمعية'),
                         onPressed: () async {
                           final res = await Navigator.push(
@@ -140,7 +176,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
 
                   if (_activeCircles.isEmpty)
                     Container(
@@ -155,21 +191,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   else
                     ..._activeCircles.map((circle) {
                       final isCompleted = circle['status'] == 'completed';
+                      final startDate = DateTime.tryParse(circle['start_date']) ?? DateTime.now();
+                      final totalMonths = circle['total_months'] as int? ?? 1;
+                      final cycleType = circle['cycle_type'] ?? 'monthly';
+                      final endDate = _calculateEndDate(startDate, totalMonths, cycleType);
+
                       return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: isCompleted ? Colors.grey : Colors.teal.shade100,
-                            child: Icon(
-                              isCompleted ? Icons.check_circle : Icons.group_work,
-                              color: isCompleted ? Colors.white : Colors.teal.shade800,
-                            ),
-                          ),
-                          title: Text(circle['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text(
-                            'السهم: ${circle['share_amount']} $cur • ${circle['total_months']} شهور (${circle['cycle_type'] ?? "شهرية"})',
-                          ),
-                          trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                        margin: const EdgeInsets.symmetric(vertical: 6),
+                        elevation: 1.5,
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(12),
                           onTap: () async {
                             await Navigator.push(
                               context,
@@ -179,12 +210,86 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                   circleName: circle['name'],
                                   shareAmount: circle['share_amount'],
                                   totalMonths: circle['total_months'],
-                                  cycleType: circle['cycle_type'] ?? 'monthly',
+                                  cycleType: cycleType,
                                 ),
                               ),
                             );
                             _fetchDashboardData();
                           },
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    CircleAvatar(
+                                      backgroundColor: isCompleted ? Colors.grey : Colors.teal.shade100,
+                                      child: Icon(
+                                        isCompleted ? Icons.check_circle : Icons.group_work,
+                                        color: isCompleted ? Colors.white : Colors.teal.shade800,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            circle['name'],
+                                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                                          ),
+                                          Text(
+                                            'السهم: ${circle['share_amount']} $cur • ${circle['total_months']} أدوار ($cycleType)',
+                                            style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    PopupMenuButton<String>(
+                                      onSelected: (val) async {
+                                        if (val == 'edit') {
+                                          final res = await Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => AddEditCircleScreen(existingCircle: circle),
+                                            ),
+                                          );
+                                          if (res == true) _fetchDashboardData();
+                                        } else if (val == 'delete') {
+                                          _confirmDeleteCircle(circle);
+                                        }
+                                      },
+                                      itemBuilder: (_) => const [
+                                        PopupMenuItem(value: 'edit', child: Row(children: [Icon(Icons.edit, color: Colors.blue), SizedBox(width: 8), Text('تعديل الجمعية')])),
+                                        PopupMenuItem(value: 'delete', child: Row(children: [Icon(Icons.delete, color: Colors.red), SizedBox(width: 8), Text('حذف الجمعية')])),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                const Divider(height: 16),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.play_circle_outline, size: 16, color: Colors.green),
+                                        const SizedBox(width: 4),
+                                        Text('البداية: ${DateFormat('yyyy-MM-dd').format(startDate)}', style: const TextStyle(fontSize: 12)),
+                                      ],
+                                    ),
+                                    Row(
+                                      children: [
+                                        const Icon(Icons.flag_outlined, size: 16, color: Colors.orange),
+                                        const SizedBox(width: 4),
+                                        Text('النهاية: ${DateFormat('yyyy-MM-dd').format(endDate)}', style: const TextStyle(fontSize: 12)),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
                       );
                     }),
@@ -193,15 +298,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'قائمة المتأخرين عن السداد:',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
+                      const Text('قائمة المتأخرين عن السداد:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                       Chip(
-                        label: Text(
-                          '${_lateMembers.length} قسط متأخر',
-                          style: const TextStyle(color: Colors.white, fontSize: 12),
-                        ),
+                        label: Text('${_lateMembers.length} قسط متأخر', style: const TextStyle(color: Colors.white, fontSize: 12)),
                         backgroundColor: Colors.red.shade700,
                       ),
                     ],
@@ -210,15 +309,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
                   if (_lateMembers.isEmpty)
                     Container(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(20),
                       alignment: Alignment.center,
-                      child: const Column(
-                        children: [
-                          Icon(Icons.check_circle_outline, size: 48, color: Colors.green),
-                          SizedBox(height: 6),
-                          Text('لا توجد أقساط متأخرة حالياً، كل الحسابات منتظمة!'),
-                        ],
-                      ),
+                      child: const Text('لا توجد أقساط متأخرة، الحسابات منتظمة!'),
                     )
                   else
                     ListView.builder(
@@ -235,22 +328,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               child: const Icon(Icons.person_outline, color: Colors.red),
                             ),
                             title: Text(item['member_name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                            subtitle: Text(
-                              '${item['circle_name']} • دور ${item['month_index']} (${item['amount_paid']} $cur)',
-                              style: TextStyle(color: Colors.grey.shade700, fontSize: 12),
-                            ),
+                            subtitle: Text('${item['circle_name']} • دور ${item['month_index']} (${item['amount_paid']} $cur)'),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 if (item['member_phone'] != null && item['member_phone'].toString().isNotEmpty)
-                                  IconButton(
-                                    icon: const Icon(Icons.phone, color: Colors.blue),
-                                    onPressed: () => _callMember(item['member_phone']),
-                                  ),
-                                IconButton(
-                                  icon: const Icon(Icons.share, color: Colors.green),
-                                  onPressed: () => _sendLateReminder(item),
-                                ),
+                                  IconButton(icon: const Icon(Icons.phone, color: Colors.blue), onPressed: () => _callMember(item['member_phone'])),
+                                IconButton(icon: const Icon(Icons.share, color: Colors.green), onPressed: () => _sendLateReminder(item)),
                               ],
                             ),
                           ),
