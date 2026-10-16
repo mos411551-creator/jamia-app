@@ -1,21 +1,22 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'services/notification_service.dart';
-import 'services/biometric_service.dart';
 import 'services/settings_controller.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await NotificationService().init();
-  final isAuthed = await BiometricService.authenticate();
-  runApp(JamiaMasterApp(isAuthenticated: isAuthed));
+  
+  try {
+    await NotificationService().init();
+  } catch (_) {}
+
+  runApp(const JamiaMasterApp());
 }
 
 class JamiaMasterApp extends StatelessWidget {
-  final bool isAuthenticated;
-  const JamiaMasterApp({super.key, required this.isAuthenticated});
+  const JamiaMasterApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -35,19 +36,19 @@ class JamiaMasterApp extends StatelessWidget {
           ],
           theme: ThemeData(
             useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.light),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.teal,
+              brightness: Brightness.light,
+            ),
           ),
           darkTheme: ThemeData(
             useMaterial3: true,
-            colorScheme: ColorScheme.fromSeed(seedColor: Colors.teal, brightness: Brightness.dark),
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: Colors.teal,
+              brightness: Brightness.dark,
+            ),
           ),
-          home: isAuthenticated
-              ? const NavigationRoot()
-              : const Scaffold(
-                  body: Center(
-                    child: Text('يرجى التحقق من الهوية لفتح التطبيق', style: TextStyle(fontSize: 16)),
-                  ),
-                ),
+          home: const NavigationRoot(),
         );
       },
     );
