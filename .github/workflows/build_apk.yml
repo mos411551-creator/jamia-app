@@ -24,18 +24,40 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Clean & Recreate Android
+      - name: Recreate Android Project
         run: |
           rm -rf android
-          flutter create . --platforms=android --org=com.example -a java
-          rm -f android/app/build.gradle.kts
-          rm -f android/build.gradle.kts
+          flutter create . --platforms=android --org=com.example
 
-      - name: Configure Gradle
+      - name: Setup Valid Gradle Files
         run: |
+          # 1. إعداد build.gradle الرئيسي
+          cat << 'EOF' > android/build.gradle
+          allprojects {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.buildDir = "../build"
+          subprojects {
+              project.buildDir = "${rootProject.buildDir}/${project.name}"
+          }
+          subprojects {
+              project.evaluationDependsOn(":app")
+          }
+
+          tasks.register("clean", Delete) {
+              delete rootProject.buildDir
+          }
+          EOF
+
+          # 2. إعداد android/app/build.gradle مع desugaring لدعم الإشعارات
           cat << 'EOF' > android/app/build.gradle
           plugins {
               id "com.android.application"
+              id "kotlin-android"
               id "dev.flutter.flutter-gradle-plugin"
           }
 
@@ -47,6 +69,10 @@ jobs:
                   sourceCompatibility = JavaVersion.VERSION_1_8
                   targetCompatibility = JavaVersion.VERSION_1_8
                   coreLibraryDesugaringEnabled true
+              }
+
+              kotlinOptions {
+                  jvmTarget = "1.8"
               }
 
               defaultConfig {
@@ -74,6 +100,11 @@ jobs:
           }
           EOF
 
+          # 3. إزالة أي ملفات kts متبقية تسبب تضارباً
+          rm -f android/build.gradle.kts
+          rm -f android/app/build.gradle.kts
+          rm -f android/settings.gradle.kts || true
+
       - name: Get Dependencies
         run: flutter pub get
 
@@ -85,4 +116,3 @@ jobs:
         with:
           name: jamia-app-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          
