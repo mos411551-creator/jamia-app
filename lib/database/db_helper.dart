@@ -79,6 +79,50 @@ class DBHelper {
     ''');
   }
 
+  // --- دوال الجمعيات ---
+  Future<void> deleteCircle(int circleId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('payments', where: 'circle_id = ?', whereArgs: [circleId]);
+      await txn.delete('payouts', where: 'circle_id = ?', whereArgs: [circleId]);
+      await txn.delete('members', where: 'circle_id = ?', whereArgs: [circleId]);
+      await txn.delete('circles', where: 'id = ?', whereArgs: [circleId]);
+    });
+  }
+
+  // --- دوال الأعضاء ---
+  Future<void> updateMember(int memberId, String name, String phone) async {
+    final db = await database;
+    await db.update(
+      'members',
+      {'name': name, 'phone': phone},
+      where: 'id = ?',
+      whereArgs: [memberId],
+    );
+  }
+
+  Future<void> deleteMember(int memberId, int circleId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      await txn.delete('payments', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
+      await txn.delete('payouts', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
+      await txn.delete('members', where: 'id = ?', whereArgs: [memberId]);
+      
+      // تحديث إجمالي عدد الشهور/الأدوار للجمعية
+      final countResult = await txn.rawQuery(
+        'SELECT COUNT(*) as cnt FROM members WHERE circle_id = ?',
+        [circleId],
+      );
+      final count = (countResult.first['cnt'] as int?) ?? 0;
+      await txn.update(
+        'circles',
+        {'total_months': count},
+        where: 'id = ?',
+        whereArgs: [circleId],
+      );
+    });
+  }
+
   Future<bool> swapPayoutTurns({
     required int payoutId1,
     required int memberId1,
@@ -98,31 +142,9 @@ class DBHelper {
         }
       }
 
-      await txn.update(
-        'payouts',
-        {'member_id': memberId2},
-        where: 'id = ?',
-        whereArgs: [payoutId1],
-      );
-
-      await txn.update(
-        'payouts',
-        {'member_id': memberId1},
-        where: 'id = ?',
-        whereArgs: [payoutId2],
-      );
-
+      await txn.update('payouts', {'member_id': memberId2}, where: 'id = ?', whereArgs: [payoutId1]);
+      await txn.update('payouts', {'member_id': memberId1}, where: 'id = ?', whereArgs: [payoutId2]);
       return true;
     });
-  }
-
-  Future<void> archiveCircle(int circleId) async {
-    final db = await database;
-    await db.update(
-      'circles',
-      {'status': 'completed'},
-      where: 'id = ?',
-      whereArgs: [circleId],
-    );
   }
 }
