@@ -24,16 +24,17 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Recreate Android Project
-        run: flutter create . --platforms=android --org=com.example
+      - name: Recreate Android Project with Groovy
+        run: |
+          rm -rf android
+          flutter create . --platforms=android --org=com.example -a java
 
       - name: Configure Desugaring
         run: |
-          cat << 'EOF' > android/app/build.gradle.kts
+          cat << 'EOF' > android/app/build.gradle
           plugins {
-              id("com.android.application")
-              id("kotlin-android")
-              id("dev.flutter.flutter-gradle-plugin")
+              id "com.android.application"
+              id "dev.flutter.flutter-gradle-plugin"
           }
 
           android {
@@ -44,11 +45,7 @@ jobs:
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_1_8
                   targetCompatibility = JavaVersion.VERSION_1_8
-                  isCoreLibraryDesugaringEnabled = true
-              }
-
-              kotlinOptions {
-                  jvmTarget = "1.8"
+                  coreLibraryDesugaringEnabled true
               }
 
               defaultConfig {
@@ -57,12 +54,12 @@ jobs:
                   targetSdk = flutter.targetSdkVersion
                   versionCode = flutter.versionCode
                   versionName = flutter.versionName
-                  multiDexEnabled = true
+                  multiDexEnabled true
               }
 
               buildTypes {
                   release {
-                      signingConfig = signingConfigs.getByName("debug")
+                      signingConfig = signingConfigs.debug
                   }
               }
           }
@@ -72,7 +69,7 @@ jobs:
           }
 
           dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
           }
           EOF
 
