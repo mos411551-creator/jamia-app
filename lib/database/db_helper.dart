@@ -32,6 +32,7 @@ class DBHelper {
         share_amount REAL NOT NULL,
         total_months INTEGER NOT NULL,
         start_date TEXT NOT NULL,
+        end_date TEXT,
         cycle_type TEXT DEFAULT 'monthly',
         payment_method TEXT DEFAULT 'cash',
         status TEXT DEFAULT 'active'
@@ -79,7 +80,44 @@ class DBHelper {
     ''');
   }
 
-  // --- دوال الجمعيات ---
+  // --- تحديث بيانات الجمعية الشامل (القسط، البداية، النهاية) ---
+  Future<void> updateCircleDetails({
+    required int circleId,
+    required String name,
+    required double shareAmount,
+    required String cycleType,
+    required String paymentMethod,
+    required String startDate,
+    required String endDate,
+  }) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      // 1. تحديث جدول الجمعيات
+      await txn.update(
+        'circles',
+        {
+          'name': name,
+          'share_amount': shareAmount,
+          'cycle_type': cycleType,
+          'payment_method': paymentMethod,
+          'start_date': startDate,
+          'end_date': endDate,
+        },
+        where: 'id = ?',
+        whereArgs: [circleId],
+      );
+
+      // 2. تحديث قيمة الأقساط غير المسددة بالقيمة الجديدة
+      await txn.update(
+        'payments',
+        {'amount_paid': shareAmount},
+        where: 'circle_id = ? AND is_paid = 0',
+        whereArgs: [circleId],
+      );
+    });
+  }
+
+  // --- دوال حذف الجمعية وإدارة الأعضاء ---
   Future<void> deleteCircle(int circleId) async {
     final db = await database;
     await db.transaction((txn) async {
@@ -90,7 +128,6 @@ class DBHelper {
     });
   }
 
-  // --- دوال الأعضاء ---
   Future<void> updateMember(int memberId, String name, String phone) async {
     final db = await database;
     await db.update(
@@ -107,8 +144,7 @@ class DBHelper {
       await txn.delete('payments', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
       await txn.delete('payouts', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
       await txn.delete('members', where: 'id = ?', whereArgs: [memberId]);
-      
-      // تحديث إجمالي عدد الشهور/الأدوار للجمعية
+
       final countResult = await txn.rawQuery(
         'SELECT COUNT(*) as cnt FROM members WHERE circle_id = ?',
         [circleId],
