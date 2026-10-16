@@ -24,12 +24,14 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Recreate Android Project with Groovy
+      - name: Clean & Recreate Android
         run: |
           rm -rf android
           flutter create . --platforms=android --org=com.example -a java
+          rm -f android/app/build.gradle.kts
+          rm -f android/build.gradle.kts
 
-      - name: Configure Desugaring
+      - name: Configure Gradle
         run: |
           cat << 'EOF' > android/app/build.gradle
           plugins {
@@ -39,8 +41,7 @@ jobs:
 
           android {
               namespace = "com.example.jamia_app"
-              compileSdk = flutter.compileSdkVersion
-              ndkVersion = flutter.ndkVersion
+              compileSdk = 34
 
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_1_8
@@ -50,10 +51,10 @@ jobs:
 
               defaultConfig {
                   applicationId = "com.example.jamia_app"
-                  minSdk = flutter.minSdkVersion
-                  targetSdk = flutter.targetSdkVersion
-                  versionCode = flutter.versionCode
-                  versionName = flutter.versionName
+                  minSdk = 21
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
                   multiDexEnabled true
               }
 
@@ -77,7 +78,7 @@ jobs:
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --release
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
