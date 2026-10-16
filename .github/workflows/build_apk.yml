@@ -24,8 +24,15 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Recreate Android Project Structure
+      - name: Recreate Android Structure
         run: flutter create . --platforms=android --org=com.example
+
+      - name: Configure Desugaring for Notifications
+        run: |
+          sed -i 's/compileOptions {/compileOptions {\n        coreLibraryDesugaringEnabled true/' android/app/build.gradle
+          sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"/' android/app/build.gradle
+          sed -i 's/minSdkVersion = .*/minSdkVersion = 21/' android/app/build.gradle || true
+          sed -i 's/minSdk = .*/minSdk = 21/' android/app/build.gradle || true
 
       - name: Get Dependencies
         run: flutter pub get
