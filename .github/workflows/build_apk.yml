@@ -24,15 +24,18 @@ jobs:
         with:
           channel: 'stable'
 
+      - name: Recreate Android Project Structure
+        run: flutter create . --platforms=android --org=com.example
+
       - name: Get Dependencies
         run: flutter pub get
 
       - name: Build APK
-        run: flutter build apk --split-per-abi
+        run: flutter build apk --release
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: jamia-app-apk
-          path: build/app/outputs/flutter-apk/*.apk
+          path: build/app/outputs/flutter-apk/app-release.apk
           
