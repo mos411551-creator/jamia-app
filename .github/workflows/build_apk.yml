@@ -24,15 +24,20 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Recreate Android Structure
+      - name: Recreate Android Project
         run: flutter create . --platforms=android --org=com.example
 
-      - name: Configure Desugaring for Notifications
+      - name: Configure Desugaring
         run: |
-          sed -i 's/compileOptions {/compileOptions {\n        coreLibraryDesugaringEnabled true/' android/app/build.gradle
-          sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"/' android/app/build.gradle
-          sed -i 's/minSdkVersion = .*/minSdkVersion = 21/' android/app/build.gradle || true
-          sed -i 's/minSdk = .*/minSdk = 21/' android/app/build.gradle || true
+          if [ -f android/app/build.gradle.kts ]; then
+            FILE="android/app/build.gradle.kts"
+            sed -i 's/compileOptions {/compileOptions {\n        isCoreLibraryDesugaringEnabled = true/' "$FILE"
+            sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")/' "$FILE"
+          elif [ -f android/app/build.gradle ]; then
+            FILE="android/app/build.gradle"
+            sed -i 's/compileOptions {/compileOptions {\n        coreLibraryDesugaringEnabled true/' "$FILE"
+            sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"/' "$FILE"
+          fi
 
       - name: Get Dependencies
         run: flutter pub get
