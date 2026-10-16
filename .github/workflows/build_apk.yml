@@ -24,86 +24,34 @@ jobs:
         with:
           channel: 'stable'
 
-      - name: Recreate Android Project
+      - name: Recreate Clean Android Structure
         run: |
           rm -rf android
           flutter create . --platforms=android --org=com.example
 
-      - name: Setup Valid Gradle Files
+      - name: Enable Desugaring in Kotlin DSL
         run: |
-          # 1. إعداد build.gradle الرئيسي
-          cat << 'EOF' > android/build.gradle
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
+          python3 -c '
+          path = "android/app/build.gradle.kts"
+          with open(path, "r") as f:
+              content = f.read()
 
-          rootProject.buildDir = "../build"
-          subprojects {
-              project.buildDir = "${rootProject.buildDir}/${project.name}"
-          }
-          subprojects {
-              project.evaluationDependsOn(":app")
-          }
+          # تفعيل desugaring في compileOptions
+          target_compile = "compileOptions {"
+          replace_compile = "compileOptions {\n        isCoreLibraryDesugaringEnabled = true"
+          content = content.replace(target_compile, replace_compile, 1)
 
-          tasks.register("clean", Delete) {
-              delete rootProject.buildDir
-          }
-          EOF
-
-          # 2. إعداد android/app/build.gradle مع desugaring لدعم الإشعارات
-          cat << 'EOF' > android/app/build.gradle
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-
-          android {
-              namespace = "com.example.jamia_app"
-              compileSdk = 34
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_1_8
-                  targetCompatibility = JavaVersion.VERSION_1_8
-                  coreLibraryDesugaringEnabled true
-              }
-
-              kotlinOptions {
-                  jvmTarget = "1.8"
-              }
-
-              defaultConfig {
-                  applicationId = "com.example.jamia_app"
-                  minSdk = 21
-                  targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
-                  multiDexEnabled true
-              }
-
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.debug
-                  }
-              }
-          }
-
-          flutter {
-              source = "../.."
-          }
-
+          # إضافة التبعية في نهاية الملف
+          dep_block = """
           dependencies {
-              coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
           }
-          EOF
+          """
+          content += dep_block
 
-          # 3. إزالة أي ملفات kts متبقية تسبب تضارباً
-          rm -f android/build.gradle.kts
-          rm -f android/app/build.gradle.kts
-          rm -f android/settings.gradle.kts || true
+          with open(path, "w") as f:
+              f.write(content)
+          '
 
       - name: Get Dependencies
         run: flutter pub get
