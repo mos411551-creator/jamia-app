@@ -19,12 +19,22 @@ class DBHelper {
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 3,
       onCreate: _createDB,
+      onUpgrade: (db, oldV, newV) async {
+        if (oldV < 3) {
+          try {
+            await db.execute("ALTER TABLE members ADD COLUMN turn_index INTEGER DEFAULT 1");
+            await db.execute("ALTER TABLE payouts ADD COLUMN expected_amount REAL DEFAULT 0.0");
+            await db.execute("ALTER TABLE circles ADD COLUMN end_date TEXT");
+          } catch (_) {}
+        }
+      },
     );
   }
 
   Future _createDB(Database db, int version) async {
+    // 1. جدول الجمعيات
     await db.execute('''
       CREATE TABLE circles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -33,12 +43,13 @@ class DBHelper {
         total_months INTEGER NOT NULL,
         start_date TEXT NOT NULL,
         end_date TEXT,
-        cycle_type TEXT DEFAULT 'monthly',
+        cycle_type TEXT DEFAULT 'daily',
         payment_method TEXT DEFAULT 'cash',
         status TEXT DEFAULT 'active'
       )
     ''');
 
+    // 2. جدول الأعضاء
     await db.execute('''
       CREATE TABLE members (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -46,16 +57,19 @@ class DBHelper {
         name TEXT NOT NULL,
         phone TEXT,
         shares_count REAL DEFAULT 1.0,
+        turn_index INTEGER DEFAULT 1,
         FOREIGN KEY (circle_id) REFERENCES circles (id) ON DELETE CASCADE
       )
     ''');
 
+    // 3. جدول أدوار القبض
     await db.execute('''
       CREATE TABLE payouts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         circle_id INTEGER NOT NULL,
         member_id INTEGER NOT NULL,
         month_index INTEGER NOT NULL,
+        expected_amount REAL NOT NULL,
         payout_date TEXT NOT NULL,
         is_received INTEGER DEFAULT 0,
         FOREIGN KEY (circle_id) REFERENCES circles (id) ON DELETE CASCADE,
@@ -63,6 +77,7 @@ class DBHelper {
       )
     ''');
 
+    // 4. جدول سداد الأقساط
     await db.execute('''
       CREATE TABLE payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -80,44 +95,32 @@ class DBHelper {
     ''');
   }
 
-  // --- تحديث بيانات الجمعية الشامل (القسط، البداية، النهاية) ---
+  // --- دوال الجمعية ---
   Future<void> updateCircleDetails({
     required int circleId,
     required String name,
     required double shareAmount,
     required String cycleType,
-    required String paymentMethod,
     required String startDate,
     required String endDate,
   }) async {
     final db = await database;
     await db.transaction((txn) async {
-      // 1. تحديث جدول الجمعيات
       await txn.update(
         'circles',
         {
           'name': name,
           'share_amount': shareAmount,
           'cycle_type': cycleType,
-          'payment_method': paymentMethod,
           'start_date': startDate,
           'end_date': endDate,
         },
         where: 'id = ?',
         whereArgs: [circleId],
       );
-
-      // 2. تحديث قيمة الأقساط غير المسددة بالقيمة الجديدة
-      await txn.update(
-        'payments',
-        {'amount_paid': shareAmount},
-        where: 'circle_id = ? AND is_paid = 0',
-        whereArgs: [circleId],
-      );
     });
   }
 
-  // --- دوال حذف الجمعية وإدارة الأعضاء ---
   Future<void> deleteCircle(int circleId) async {
     final db = await database;
     await db.transaction((txn) async {
@@ -128,6 +131,7 @@ class DBHelper {
     });
   }
 
+  // --- دوال الأعضاء ---
   Future<void> updateMember(int memberId, String name, String phone) async {
     final db = await database;
     await db.update(
@@ -144,21 +148,10 @@ class DBHelper {
       await txn.delete('payments', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
       await txn.delete('payouts', where: 'member_id = ? AND circle_id = ?', whereArgs: [memberId, circleId]);
       await txn.delete('members', where: 'id = ?', whereArgs: [memberId]);
-
-      final countResult = await txn.rawQuery(
-        'SELECT COUNT(*) as cnt FROM members WHERE circle_id = ?',
-        [circleId],
-      );
-      final count = (countResult.first['cnt'] as int?) ?? 0;
-      await txn.update(
-        'circles',
-        {'total_months': count},
-        where: 'id = ?',
-        whereArgs: [circleId],
-      );
     });
   }
 
+  // --- تبادل الأدوار ---
   Future<bool> swapPayoutTurns({
     required int payoutId1,
     required int memberId1,
