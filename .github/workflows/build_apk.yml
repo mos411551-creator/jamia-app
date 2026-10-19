@@ -29,17 +29,22 @@ jobs:
           rm -rf android
           flutter create . --platforms=android --org=com.example
 
-      - name: Enable Desugaring in Kotlin DSL
+      - name: Configure Gradle & Disable NDK Download
         run: |
           python3 -c '
           path = "android/app/build.gradle.kts"
           with open(path, "r") as f:
               content = f.read()
 
+          # تفعيل desugaring لدعم التنبيهات
           target_compile = "compileOptions {"
           replace_compile = "compileOptions {\n        isCoreLibraryDesugaringEnabled = true"
           content = content.replace(target_compile, replace_compile, 1)
 
+          # إيقاف إجبار تحميل NDK
+          content = content.replace("ndkVersion = flutter.ndkVersion", "ndkVersion = \"\"")
+
+          # إضافة التبعية في نهاية الملف
           dep_block = """
           dependencies {
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
@@ -50,6 +55,9 @@ jobs:
           with open(path, "w") as f:
               f.write(content)
           '
+
+      - name: Accept Android Licenses
+        run: yes | flutter doctor --android-licenses || true
 
       - name: Get Dependencies
         run: flutter pub get
