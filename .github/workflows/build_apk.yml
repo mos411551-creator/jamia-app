@@ -36,12 +36,10 @@ jobs:
           with open(path, "r") as f:
               content = f.read()
 
-          # تفعيل desugaring في compileOptions
           target_compile = "compileOptions {"
           replace_compile = "compileOptions {\n        isCoreLibraryDesugaringEnabled = true"
           content = content.replace(target_compile, replace_compile, 1)
 
-          # إضافة التبعية في نهاية الملف
           dep_block = """
           dependencies {
               coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
