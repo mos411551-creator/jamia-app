@@ -30,9 +30,9 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
   late TabController _tabController;
   bool _isLoading = true;
 
-  Map<int, Map<String, dynamic>> _payoutsByMonth = {};
+  Map<int, List<Map<String, dynamic>>> _payoutsByMonth = {};
   Map<int, List<Map<String, dynamic>>> _paymentsByMonth = {};
-  List<Map<String, dynamic>> _membersList = [];
+  List<Map<String, dynamic>> _allPayouts = [];
 
   @override
   void initState() {
@@ -56,7 +56,7 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
       FROM payouts p
       JOIN members m ON p.member_id = m.id
       WHERE p.circle_id = ?
-      ORDER BY p.month_index ASC
+      ORDER BY p.month_index ASC, p.id ASC
     ''', [widget.circleId]);
 
     final paymentsData = await db.rawQuery('''
@@ -67,16 +67,10 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
       ORDER BY pay.month_index ASC, m.id ASC
     ''', [widget.circleId]);
 
-    final membersData = await db.query(
-      'members',
-      where: 'circle_id = ?',
-      orderBy: 'id ASC',
-      whereArgs: [widget.circleId],
-    );
-
-    Map<int, Map<String, dynamic>> tempPayouts = {};
+    Map<int, List<Map<String, dynamic>>> tempPayouts = {};
     for (var row in payoutsData) {
-      tempPayouts[row['month_index'] as int] = row;
+      final month = row['month_index'] as int;
+      tempPayouts.putIfAbsent(month, () => []).add(row);
     }
 
     Map<int, List<Map<String, dynamic>>> tempPayments = {};
@@ -86,119 +80,80 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
     }
 
     setState(() {
+      _allPayouts = List<Map<String, dynamic>>.from(payoutsData);
       _payoutsByMonth = tempPayouts;
       _paymentsByMonth = tempPayments;
-      _membersList = List<Map<String, dynamic>>.from(membersData);
       _isLoading = false;
     });
   }
 
-  void _showEditMemberDialog(Map<String, dynamic> member) {
-    final nameCtrl = TextEditingController(text: member['name']);
-    final phoneCtrl = TextEditingController(text: member['phone']);
+  void _showSwapDialog() {
+    int? pIndex1;
+    int? pIndex2;
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('تعديل بيانات المشترك'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'اسم المشترك', border: OutlineInputBorder())),
-            const SizedBox(height: 12),
-            TextField(controller: phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'رقم الهاتف', border: OutlineInputBorder())),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          FilledButton(
-            onPressed: () async {
-              if (nameCtrl.text.trim().isNotEmpty) {
-                Navigator.pop(ctx);
-                await DBHelper.instance.updateMember(member['id'], nameCtrl.text.trim(), phoneCtrl.text.trim());
-                _loadCircleData();
-              }
-            },
-            child: const Text('حفظ'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _confirmDeleteMember(Map<String, dynamic> member) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('حذف المشترك'),
-        content: Text('هل أنت متأكد من حذف المشترك "${member['name']}" من هذه الجمعية؟ سيتم حذف جميع أدواره وسجلاته.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
-          FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () async {
-              Navigator.pop(ctx);
-              await DBHelper.instance.deleteMember(member['id'], widget.circleId);
-              _loadCircleData();
-            },
-            child: const Text('تأكيد الحذف'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showMembersManagementSheet() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(16),
-        height: MediaQuery.of(context).size.height * 0.7,
-        child: Column(
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('إدارة المشتركين بالجمعية', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
-              ],
-            ),
-            const Divider(),
-            Expanded(
-              child: ListView.builder(
-                itemCount: _membersList.length,
-                itemBuilder: (context, i) {
-                  final m = _membersList[i];
-                  return Card(
-                    child: ListTile(
-                      leading: CircleAvatar(child: Text('${i + 1}')),
-                      title: Text(m['name'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                      subtitle: Text(m['phone'] != null && m['phone'].toString().isNotEmpty ? m['phone'] : 'لا يوجد هاتف'),
-                      trailing: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          IconButton(
-                            icon: const Icon(Icons.edit, color: Colors.blue),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _showEditMemberDialog(m);
-                            },
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.delete, color: Colors.red),
-                            onPressed: () {
-                              Navigator.pop(ctx);
-                              _confirmDeleteMember(m);
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('تبادل أدوار القبض'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButton<int>(
+                isExpanded: true,
+                hint: const Text('اختر الدور الأول'),
+                value: pIndex1,
+                items: _allPayouts.asMap().entries.map((e) {
+                  final p = e.value;
+                  return DropdownMenuItem(
+                    value: e.key,
+                    child: Text('دور ${p['month_index']} - ${p['receiver_name']} (${p['is_received'] == 1 ? "تم القبض" : "متاح"})'),
                   );
-                },
+                }).toList(),
+                onChanged: (val) => setDialogState(() => pIndex1 = val),
               ),
+              const SizedBox(height: 12),
+              DropdownButton<int>(
+                isExpanded: true,
+                hint: const Text('اختر الدور المراد التبديل معه'),
+                value: pIndex2,
+                items: _allPayouts.asMap().entries.map((e) {
+                  final p = e.value;
+                  return DropdownMenuItem(
+                    value: e.key,
+                    child: Text('دور ${p['month_index']} - ${p['receiver_name']} (${p['is_received'] == 1 ? "تم القبض" : "متاح"})'),
+                  );
+                }).toList(),
+                onChanged: (val) => setDialogState(() => pIndex2 = val),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('إلغاء')),
+            FilledButton(
+              onPressed: () async {
+                if (pIndex1 != null && pIndex2 != null) {
+                  final p1 = _allPayouts[pIndex1!];
+                  final p2 = _allPayouts[pIndex2!];
+
+                  final success = await DBHelper.instance.swapPayoutTurns(
+                    payoutId1: p1['id'],
+                    memberId1: p1['member_id'],
+                    payoutId2: p2['id'],
+                    memberId2: p2['member_id'],
+                  );
+
+                  Navigator.pop(ctx);
+                  if (success) {
+                    _loadCircleData();
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('لا يمكن التبديل لأن أحد العضوين قد استلم بالفعل!')),
+                    );
+                  }
+                }
+              },
+              child: const Text('تبديل الأدوار'),
             ),
           ],
         ),
@@ -207,38 +162,20 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
   }
 
   Future<void> _togglePayment(int paymentId, int currentStatus) async {
+    final db = await DBHelper.instance.database;
     if (currentStatus == 1) {
-      final db = await DBHelper.instance.database;
       await db.update('payments', {'is_paid': 0, 'payment_date': null}, where: 'id = ?', whereArgs: [paymentId]);
       await _loadCircleData();
       return;
     }
 
-    showModalBottomSheet(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Padding(
-              padding: EdgeInsets.all(16),
-              child: Text('اختر وسيلة التوريد للسداد', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            ),
-            ListTile(leading: const Icon(Icons.money, color: Colors.green), title: const Text('نقداً (كاش)'), onTap: () => _confirmPayment(paymentId, 'cash')),
-            ListTile(leading: const Icon(Icons.phone_android, color: Colors.red), title: const Text('محفظة إلكترونية (فودافون كاش)'), onTap: () => _confirmPayment(paymentId, 'wallet')),
-            ListTile(leading: const Icon(Icons.account_balance, color: Colors.purple), title: const Text('إنستاباي / تحويل بنكي'), onTap: () => _confirmPayment(paymentId, 'bank')),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _confirmPayment(int paymentId, String method) async {
-    Navigator.pop(context);
-    final db = await DBHelper.instance.database;
     await db.update(
       'payments',
-      {'is_paid': 1, 'payment_method': method, 'payment_date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())},
+      {
+        'is_paid': 1,
+        'payment_method': 'cash',
+        'payment_date': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+      },
       where: 'id = ?',
       whereArgs: [paymentId],
     );
@@ -251,36 +188,6 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
     await _loadCircleData();
   }
 
-  void _showReceiptDialog(Map<String, dynamic> item, int month) {
-    final key = GlobalKey();
-    showDialog(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            PaymentReceiptCard(
-              boundaryKey: key,
-              circleName: widget.circleName,
-              memberName: item['member_name'],
-              amount: widget.shareAmount,
-              paymentMethod: item['payment_method'] ?? 'cash',
-              paymentDate: item['payment_date'] ?? '',
-              monthIndex: month,
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              icon: const Icon(Icons.share),
-              label: const Text('مشاركة الإيصال على واتساب'),
-              onPressed: () => ReceiptHelper.shareReceipt(key, item['member_name'], widget.circleName),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -289,35 +196,9 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
         centerTitle: true,
         actions: [
           IconButton(
-            icon: const Icon(Icons.people_outline),
-            tooltip: 'إدارة وتعديل المشتركين',
-            onPressed: _showMembersManagementSheet,
-          ),
-          IconButton(
-            icon: const Icon(Icons.picture_as_pdf),
-            tooltip: 'تصدير كشف حساب PDF',
-            onPressed: () async {
-              final curMonth = _tabController.index + 1;
-              final pInfo = _payoutsByMonth[curMonth];
-              final pays = _paymentsByMonth[curMonth] ?? [];
-              if (pInfo == null) return;
-
-              final bytes = await PdfService.generateCircleReport(
-                circleName: widget.circleName,
-                cycleType: widget.cycleType,
-                currentCycleIndex: curMonth,
-                shareAmount: widget.shareAmount,
-                receiverName: pInfo['receiver_name'],
-                payoutDate: pInfo['payout_date'],
-                isReceived: pInfo['is_received'] == 1,
-                payments: pays,
-              );
-              await PdfService.sharePdfReport(
-                circleName: widget.circleName,
-                cycleIndex: curMonth,
-                pdfBytes: bytes,
-              );
-            },
+            icon: const Icon(Icons.swap_horiz),
+            tooltip: 'تبادل الأدوار',
+            onPressed: _showSwapDialog,
           ),
         ],
         bottom: widget.totalMonths > 0
@@ -330,112 +211,65 @@ class _CircleDetailsScreenState extends State<CircleDetailsScreen>
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : widget.totalMonths == 0
-              ? const Center(child: Text('لا يوجد أعضاء في هذه الجمعية حالياً'))
-              : TabBarView(
-                  controller: _tabController,
-                  children: List.generate(widget.totalMonths, (i) => _buildTab(i + 1)),
-                ),
+          : TabBarView(
+              controller: _tabController,
+              children: List.generate(widget.totalMonths, (i) => _buildTab(i + 1)),
+            ),
     );
   }
 
   Widget _buildTab(int monthIndex) {
-    final payoutInfo = _payoutsByMonth[monthIndex];
+    final payouts = _payoutsByMonth[monthIndex] ?? [];
     final payments = _paymentsByMonth[monthIndex] ?? [];
-    final paidCount = payments.where((p) => p['is_paid'] == 1).length;
-    final totalMembers = payments.length;
-    final progress = totalMembers > 0 ? (paidCount / totalMembers) : 0.0;
 
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        if (payoutInfo != null)
-          Card(
-            color: Colors.teal.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Row(
-                children: [
-                  const CircleAvatar(backgroundColor: Colors.teal, child: Icon(Icons.star, color: Colors.white)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('مستحق القبض:', style: TextStyle(fontSize: 12, color: Colors.black54)),
-                        Text(payoutInfo['receiver_name'], style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                        Text('التاريخ: ${payoutInfo['payout_date']}', style: const TextStyle(fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  FilterChip(
-                    label: Text(payoutInfo['is_received'] == 1 ? 'تم القبض' : 'لم يقبض'),
-                    selected: payoutInfo['is_received'] == 1,
-                    onSelected: (_) => _togglePayout(payoutInfo['id'], payoutInfo['is_received']),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 12),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('نسبة تحصيل الدور', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text('${(progress * 100).toStringAsFixed(0)}%'),
-                  ],
+        if (payouts.isNotEmpty) ...[
+          const Text('المستحقين للقبض في هذا الدور:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+          const SizedBox(height: 6),
+          ...payouts.map((pInfo) {
+            final isRec = pInfo['is_received'] == 1;
+            return Card(
+              color: Colors.teal.shade50,
+              child: ListTile(
+                leading: const Icon(Icons.star, color: Colors.teal),
+                title: Text(pInfo['receiver_name'], style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('المبلغ: ${pInfo['expected_amount']} ج.م • التاريخ: ${pInfo['payout_date']}'),
+                trailing: FilterChip(
+                  label: Text(isRec ? 'تم القبض' : 'لم يقبض'),
+                  selected: isRec,
+                  onSelected: (_) => _togglePayout(pInfo['id'], pInfo['is_received']),
                 ),
-                const SizedBox(height: 8),
-                LinearProgressIndicator(value: progress, minHeight: 8, borderRadius: BorderRadius.circular(4)),
-                const SizedBox(height: 6),
-                Text('سدد $paidCount من $totalMembers مشترك', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-              ],
-            ),
-          ),
-        ),
+              ),
+            );
+          }),
+        ],
         const SizedBox(height: 16),
-        const Text('جدول المشتركين والأقساط:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+        const Text('أقساط هذا الدور:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
         const SizedBox(height: 8),
         ...payments.map((item) {
           final isPaid = item['is_paid'] == 1;
           return Card(
-            margin: const EdgeInsets.symmetric(vertical: 4),
             child: ListTile(
               leading: Checkbox(
                 value: isPaid,
                 onChanged: (_) => _togglePayment(item['id'], item['is_paid']),
               ),
               title: Text(item['member_name'], style: TextStyle(fontWeight: FontWeight.w600, decoration: isPaid ? TextDecoration.lineThrough : null)),
-              subtitle: Text(isPaid ? 'تم الدفع: ${item['payment_method']} (${item['payment_date'] ?? ""})' : 'قيمة القسط: ${widget.shareAmount} ج.م'),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (isPaid)
-                    IconButton(
-                      icon: const Icon(Icons.receipt_long, color: Colors.teal),
-                      tooltip: 'إيصال رقمي',
-                      onPressed: () => _showReceiptDialog(item, monthIndex),
-                    ),
-                  if (!isPaid)
-                    IconButton(
+              subtitle: Text('قيمة القسط: ${item['amount_paid']} ج.م ${isPaid ? "(تم السداد)" : ""}'),
+              trailing: !isPaid
+                  ? IconButton(
                       icon: const Icon(Icons.share, color: Colors.green),
-                      tooltip: 'تذكير واتساب ورابط دفع',
                       onPressed: () => PaymentLinkService.sendPaymentReminder(
                         memberPhone: item['member_phone'] ?? '',
                         memberName: item['member_name'],
                         circleName: widget.circleName,
-                        amount: widget.shareAmount,
+                        amount: (item['amount_paid'] as num).toDouble(),
                         turnIndex: monthIndex,
                       ),
-                    ),
-                ],
-              ),
+                    )
+                  : null,
             ),
           );
         }),
